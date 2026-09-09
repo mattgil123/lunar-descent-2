@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Lunar Descent II — Fuel Run</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:"Courier New",Courier,monospace;color:#dfe9ff;touch-action:none;-webkit-user-select:none;user-select:none}
+  canvas{display:block;width:100vw;height:100vh}
+  #pad{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-between;padding:0 14px 18px;pointer-events:none}
+  #pad button{pointer-events:auto;width:72px;height:72px;border:1.5px solid #dfe9ff;background:rgba(0,0,0,.35);color:#dfe9ff;font:28px "Courier New",monospace;border-radius:50%;box-shadow:0 0 8px rgba(223,233,255,.35)}
+  #pad button:active{background:#dfe9ff;color:#000}
+  #pad .r{display:flex;gap:14px}
+  @media (hover:hover) and (pointer:fine){#pad{display:none}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="pad">
+  <div class="r"><button id="bl">◀</button><button id="br">▶</button></div>
+  <button id="bt">▲</button>
+</div>
+<script>
+(() => {
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+let W,H,DPR;
+function resize(){DPR=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;}
+addEventListener('resize',resize);resize();
+
+// ---- constants ----
+const G=0.016, THRUST=0.048, ROT=0.045, FUEL_MAX=1200, BURN=1.4, ROT_BURN=0.12;
+const WORLD_W=3200, GROUND_BASE=620;
+const keys={l:false,r:false,t:false,any:false};
+
+// ---- terrain ----
+let terrain=[],pads=[];
+function genTerrain(){
+  terrain=[];pads=[];
+  const step=24, n=Math.floor(WORLD_W/step)+1;
+  let y=GROUND_BASE-100+Math.random()*80;
+  for(let i=0;i<n;i++){
+    y+= (Math.random()-0.5)*70;
+    y=Math.max(GROUND_BASE-260,Math.min(GROUND_BASE+60,y));
+    terrain.push({x:i*step,y});
+  }
+  // pads: 3 fuel depots + 4 scoring pads, non-overlapping
+  const specs=[
+    {kind:'fuel',w:4},{kind:'fuel',w:4},{kind:'fuel',w:4},
+    {kind:'score',w:5,mult:1},{kind:'score',w:4,mult:2},{kind:'score',w:3,mult:3},{kind:'score',w:2,mult:5}
+  ];
+  const used=[];
+  for(const s of specs){
+    let tries=0,i;
+    do{ i=6+Math.floor(Math.random()*(n-12-s.w)); tries++; }
+    while(tries<60 && used.some(u=>Math.abs(u-i)<s.w+4));
+    if(tries>=60)continue;
+    used.push(i);
+    const py=terrain[i].y;
+    for(let k=0;k<=s.w;k++) terrain[i+k].y=py;
+    pads.push({x1:terrain[i].x,x2:terrain[i+s.w].x,y:py,kind:s.kind,mult:s.mult||0});
+  }
+}
+function groundY(x){
+  const step=24;
+  const i=Math.max(0,Math.min(terrain.length-2,Math.floor(x/step)));
+  const a=terrain[i],b=terrain[i+1];
+  const t=(x-a.x)/(b.x-a.x);
+  return a.y+(b.y-a.y)*t;
+}
+function padAt(x1,x2){return pads.find(p=>x1>=p.x1&&x2<=p.x2);}
+
+// ---- lander ----
+const L={x:0,y:0,vx:0,vy:0,a:0,fuel:FUEL_MAX,alive:true,landed:false,onPad:null};
+let score=0,landers=3,state='title',msg='',msgT=0,debris=[],refuelT=0,time=0,zoom=1,scoredPads=new Set(),legs=false;
+function spawn(){L.x=200+Math.random()*(WORLD_W-400);L.y=GROUND_BASE-520;L.vx=0.6+Math.random()*0.6;L.vy=0;L.a=0;L.alive=true;L.landed=false;L.onPad=null;}
+function newRound(){genTerrain();scoredPads=new Set();spawn();}
+function reset(){score=0;landers=3;L.fuel=FUEL_MAX;time=0;newRound();state='play';msg='';}
+
+function feet(){
+  const s=Math.sin(L.a),c=Math.cos(L.a);
+  return [[L.x-9*c+12*s, L.y-9*s-12*c],[L.x+9*c+12*s, L.y+9*s-12*c]];
+}
+function explode(){
+  L.alive=false;debris=[];
+  for(let i=0;i<14;i++){
+    const ang=Math.random()*Math.PI*2,sp=1+Math.random()*2.5;
+    debris.push({x:L.x,y:L.y,vx:Math.cos(ang)*sp+L.vx*0.5,vy:Math.sin(ang)*sp-1,a:Math.random()*6,va:(Math.random()-0.5)*0.4,len:4+Math.random()*8,life:120});
+  }
+  landers--;setMsg(landers>0?'CRASHED':'GAME OVER',150);
+  if(landers<=0){state='over';}
+}
+function setMsg(m,t){msg=m;msgT=t;}
+
+// ---- update ----
+function update(){
+  if(state==='play'){
+    time++;
+    if(L.alive&&!L.landed){
+      if(keys.l&&L.fuel>0){L.a-=ROT;L.fuel-=ROT_BURN;}
+      if(keys.r&&L.fuel>0){L.a+=ROT;L.fuel-=ROT_BURN;}
+      const thrusting=keys.t&&L.fuel>0;
+      if(thrusting){L.vx+=Math.sin(L.a)*THRUST;L.vy-=Math.cos(L.a)*THRUST;L.fuel-=BURN;}
+      L.fuel=Math.max(0,L.fuel);
+      L.vy+=G;L.x+=L.vx;L.y+=L.vy;
+      if(L.x<20){L.x=20;L.vx=Math.abs(L.vx)*0.5;}
+      if(L.x>WORLD_W-20){L.x=WORLD_W-20;L.vx=-Math.abs(L.vx)*0.5;}
+      // collision
+      const f=feet();
+      const hit=f.some(p=>p[1]>=groundY(p[0]))||L.y>=groundY(L.x)-6;
+      if(hit){
+        const pad=padAt(Math.min(f[0][0],f[1][0]),Math.max(f[0][0],f[1][0]));
+        const soft=Math.abs(L.vx)<0.45&&L.vy<1.25&&Math.abs(L.a)<0.2;
+        if(pad&&soft){
+          L.landed=true;L.onPad=pad;L.vx=0;L.vy=0;L.a=0;L.y=pad.y-12;
+          if(pad.kind==='fuel'){refuelT=0;setMsg('FUEL DEPOT — REFUELING',9999);}
+          else{
+            const key=pad.x1+':'+pad.mult;
+            const quality=L.vy<0.6&&Math.abs(L.vx)<0.2?'PERFECT':'GOOD';
+            let pts=(quality==='PERFECT'?100:50)*pad.mult;
+            if(scoredPads.has(key))pts=Math.round(pts/4);
+            scoredPads.add(key);score+=pts;
+            setMsg(quality+' LANDING  +'+pts+'  (x'+pad.mult+')',150);
+          }
+        }else explode();
+      }
+    }else if(L.landed){
+      if(L.onPad.kind==='fuel'){
+        refuelT++;
+        L.fuel=Math.min(FUEL_MAX,L.fuel+6);
+        if(L.fuel>=FUEL_MAX)setMsg('TANK FULL — LIFT OFF',9999);
+        if(keys.t&&L.fuel>0){L.landed=false;L.onPad=null;L.vy=-0.6;msg='';}
+      }else{
+        if(msgT<=0||keys.t){newRound();}
+      }
+    }else{ // dead
+      if(msgT<=0&&landers>0){spawn();}
+    }
+    if(L.fuel<=0&&!L.landed&&L.alive&&L.vy>2.5&&msgT<=0)setMsg('OUT OF FUEL',60);
+  }
+  if(msgT>0)msgT--;
+  for(const d of debris){d.x+=d.vx;d.y+=d.vy;d.vy+=G;d.a+=d.va;d.life--;}
+  debris=debris.filter(d=>d.life>0);
+  // zoom in near ground, like the original
+  const alt=groundY(L.x)-L.y;
+  const target=(L.alive&&alt<150)?2.2:1;
+  zoom+=(target-zoom)*0.06;
+}
+
+// ---- draw ----
+function drawLander(x,y,a,thrust){
+  ctx.save();ctx.translate(x,y);ctx.rotate(a);
+  ctx.beginPath();
+  // capsule
+  ctx.moveTo(-6,-14);ctx.lineTo(6,-14);ctx.lineTo(9,-6);ctx.lineTo(-9,-6);ctx.closePath();
+  // body
+  ctx.moveTo(-10,-6);ctx.lineTo(10,-6);ctx.lineTo(10,2);ctx.lineTo(-10,2);ctx.closePath();
+  // legs
+  ctx.moveTo(-8,2);ctx.lineTo(-12,12);ctx.moveTo(-15,12);ctx.lineTo(-9,12);
+  ctx.moveTo(8,2);ctx.lineTo(12,12);ctx.moveTo(15,12);ctx.lineTo(9,12);
+  // nozzle
+  ctx.moveTo(-4,2);ctx.lineTo(-6,7);ctx.lineTo(6,7);ctx.lineTo(4,2);
+  ctx.stroke();
+  if(thrust){
+    const f=8+Math.random()*10;
+    ctx.beginPath();ctx.moveTo(-5,7);ctx.lineTo(0,7+f);ctx.lineTo(5,7);ctx.stroke();
+  }
+  ctx.restore();
+}
+function draw(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='#dfe9ff';ctx.fillStyle='#dfe9ff';ctx.lineWidth=1.4;ctx.lineJoin='round';
+  ctx.shadowColor='rgba(180,205,255,.7)';ctx.shadowBlur=6;
+
+  // camera
+  const worldH=H*0.78;
+  const sx=W/Math.min(WORLD_W,1000)*zoom, sy=sx;
+  let camX=L.x, camY=L.y+40;
+  const viewW=W/sx, viewH=H/sy;
+  camX=Math.max(viewW/2,Math.min(WORLD_W-viewW/2,camX));
+  camY=Math.min(GROUND_BASE+80-viewH/2+80,camY);
+  ctx.save();
+  ctx.translate(W/2,H/2);ctx.scale(sx,sy);ctx.translate(-camX,-camY);
+
+  // stars (fixed in world)
+  ctx.save();ctx.shadowBlur=0;
+  for(let i=0;i<90;i++){const x=(i*397)%WORLD_W,y=(i*211)%(GROUND_BASE-300);ctx.fillRect(x,y,1.2,1.2);}
+  ctx.restore();
+
+  // terrain
+  ctx.beginPath();ctx.moveTo(terrain[0].x,terrain[0].y);
+  for(const p of terrain)ctx.lineTo(p.x,p.y);
+  ctx.stroke();
+  // pads
+  for(const p of pads){
+    ctx.lineWidth=2.4;ctx.beginPath();ctx.moveTo(p.x1,p.y+1);ctx.lineTo(p.x2,p.y+1);ctx.stroke();ctx.lineWidth=1.4;
+    ctx.font='11px "Courier New",monospace';ctx.textAlign='center';
+    const label=p.kind==='fuel'?'FUEL':'x'+p.mult;
+    const cx=(p.x1+p.x2)/2;
+    if(p.kind==='fuel'){
+      // small pump icon
+      ctx.beginPath();ctx.rect(cx-5,p.y-16,10,12);ctx.moveTo(cx+5,p.y-12);ctx.lineTo(cx+9,p.y-12);ctx.lineTo(cx+9,p.y-4);ctx.stroke();
+      ctx.fillText(label,cx,p.y+16);
+    }else ctx.fillText(label,cx,p.y+16);
+  }
+  // lander
+  if(L.alive)drawLander(L.x,L.y,L.a,keys.t&&L.fuel>0&&!L.landed&&state==='play');
+  for(const d of debris){ctx.save();ctx.translate(d.x,d.y);ctx.rotate(d.a);ctx.beginPath();ctx.moveTo(-d.len/2,0);ctx.lineTo(d.len/2,0);ctx.stroke();ctx.restore();}
+  ctx.restore();
+
+  // HUD
+  ctx.shadowBlur=4;ctx.font='14px "Courier New",monospace';ctx.textAlign='left';
+  const alt=Math.max(0,Math.round(groundY(L.x)-L.y-12));
+  const lines=[
+    ['SCORE',String(score).padStart(5,'0')],
+    ['TIME',Math.floor(time/60/60)+':'+String(Math.floor(time/60)%60).padStart(2,'0')],
+    ['FUEL',String(Math.round(L.fuel)).padStart(4,'0')],
+    ['LANDERS','▲'.repeat(Math.max(0,landers))]
+  ];
+  lines.forEach((l,i)=>{ctx.fillText(l[0],16,26+i*18);ctx.fillText(l[1],96,26+i*18);});
+  ctx.textAlign='right';
+  const rt=[
+    ['ALTITUDE',alt],
+    ['HORIZ SPEED',Math.abs(L.vx*40).toFixed(0)+(L.vx<0?' ←':L.vx>0?' →':'')],
+    ['VERT SPEED',Math.abs(L.vy*40).toFixed(0)+(L.vy<0?' ↑':L.vy>0?' ↓':'')]
+  ];
+  rt.forEach((l,i)=>{ctx.fillText(l[0],W-96,26+i*18);ctx.fillText(String(l[1]),W-16,26+i*18);});
+  // fuel gauge
+  ctx.strokeRect(16,100,120,8);ctx.fillRect(16,100,120*(L.fuel/FUEL_MAX),8);
+  if(L.fuel<FUEL_MAX*0.2&&Math.floor(time/20)%2===0){ctx.textAlign='left';ctx.fillText('LOW FUEL',146,108);}
+
+  // messages
+  ctx.textAlign='center';
+  if(msg&&msgT>0){ctx.font='18px "Courier New",monospace';ctx.fillText(msg,W/2,H*0.32);}
+  if(state==='title'){
+    ctx.font='34px "Courier New",monospace';ctx.fillText('LUNAR DESCENT II',W/2,H*0.36);
+    ctx.font='16px "Courier New",monospace';ctx.fillText('FUEL RUN',W/2,H*0.36+28);
+    ctx.font='13px "Courier New",monospace';
+    ['Land softly on a marked pad to score.',
+     'Pads marked FUEL refill your tank — lift off and keep going.',
+     'Vertical speed under 50, horizontal under 18, keep it upright.',
+     '',
+     '← → rotate    ▲ / space thrust    (touch buttons on phone)',
+     '',
+     'PRESS ANY KEY OR TAP TO START'
+    ].forEach((t,i)=>ctx.fillText(t,W/2,H*0.36+64+i*20));
+  }
+  if(state==='over'&&msgT<=0){
+    ctx.font='28px "Courier New",monospace';ctx.fillText('GAME OVER',W/2,H*0.40);
+    ctx.font='15px "Courier New",monospace';ctx.fillText('FINAL SCORE '+score,W/2,H*0.40+30);
+    ctx.fillText('PRESS ANY KEY OR TAP TO PLAY AGAIN',W/2,H*0.40+56);
+  }
+}
+
+// ---- input ----
+function startIfIdle(){ if(state==='title'||(state==='over'&&msgT<=0)){reset();return true;} return false; }
+addEventListener('keydown',e=>{
+  if(startIfIdle()){e.preventDefault();return;}
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.l=true;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.r=true;
+  if(e.code==='ArrowUp'||e.code==='Space'||e.code==='KeyW')keys.t=true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','Space'].includes(e.code))e.preventDefault();
+});
+addEventListener('keyup',e=>{
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.l=false;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.r=false;
+  if(e.code==='ArrowUp'||e.code==='Space'||e.code==='KeyW')keys.t=false;
+});
+function bind(id,k){
+  const b=document.getElementById(id);
+  const on=e=>{e.preventDefault();if(!startIfIdle())keys[k]=true;};
+  const off=e=>{e.preventDefault();keys[k]=false;};
+  b.addEventListener('touchstart',on,{passive:false});b.addEventListener('touchend',off);b.addEventListener('touchcancel',off);
+  b.addEventListener('mousedown',on);b.addEventListener('mouseup',off);b.addEventListener('mouseleave',off);
+}
+bind('bl','l');bind('br','r');bind('bt','t');
+cv.addEventListener('touchstart',e=>{startIfIdle();},{passive:true});
+cv.addEventListener('mousedown',e=>{startIfIdle();});
+
+// ---- loop ----
+genTerrain();spawn();
+let last=0,acc=0;
+function loop(t){
+  acc+=Math.min(50,t-last);last=t;
+  while(acc>=1000/60){update();acc-=1000/60;}
+  draw();requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
