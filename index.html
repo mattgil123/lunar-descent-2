@@ -50,15 +50,19 @@ const SFX=(()=>{
       if(!ac)return;
       if(on&&!thr){
         thr=ac.createBufferSource();thr.buffer=noise(1);thr.loop=true;
-        thrF=ac.createBiquadFilter();thrF.type='lowpass';thrF.frequency.value=600;thrF.Q.value=1.5;
-        thrG=ac.createGain();thrG.gain.setValueAtTime(0.001,ac.currentTime);thrG.gain.linearRampToValueAtTime(0.35,ac.currentTime+0.08);
-        thr.connect(thrF).connect(thrG).connect(ac.destination);thr.start();
+        thrF=ac.createBiquadFilter();thrF.type='lowpass';thrF.frequency.value=220;thrF.Q.value=0.8;
+        const sub=ac.createOscillator(),sg=ac.createGain();sub.type='sawtooth';sub.frequency.value=38;sg.gain.value=0.12;const sf=ac.createBiquadFilter();sf.type='lowpass';sf.frequency.value=120;sub.connect(sf).connect(sg);thr._sub=sub;thr._sg=sg;
+        thrG=ac.createGain();thrG.gain.setValueAtTime(0.001,ac.currentTime);thrG.gain.linearRampToValueAtTime(0.55,ac.currentTime+0.08);
+        thr.connect(thrF).connect(thrG).connect(ac.destination);thr._sg.connect(thrG);thr._sub.start();thr.start();
       }else if(!on&&thr){
         const t=thr,g=thrG;g.gain.cancelScheduledValues(ac.currentTime);g.gain.setValueAtTime(g.gain.value,ac.currentTime);g.gain.linearRampToValueAtTime(0.001,ac.currentTime+0.12);
-        t.stop(ac.currentTime+0.15);thr=null;thrG=null;
+        t.stop(ac.currentTime+0.15);t._sub.stop(ac.currentTime+0.15);thr=null;thrG=null;
       }
     },
-    rotate(){ if(!ac)return; const n=performance.now(); if(n-lastBeep<90)return; lastBeep=n; tone(900,0.04,'square',0.05); },
+    rotate(){ if(!ac)return; const n=performance.now(); if(n-lastBeep<140)return; lastBeep=n;
+      const b=ac.createBufferSource();b.buffer=noise(0.12);const f=ac.createBiquadFilter();f.type='bandpass';f.frequency.value=1800;f.Q.value=0.7;
+      const g=ac.createGain();g.gain.setValueAtTime(0.09,ac.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+0.12);
+      b.connect(f).connect(g).connect(ac.destination);b.start(); },
     crash(){
       if(!ac)return; this.thrust(false); this.refuel(false);
       const s=ac.createBufferSource();s.buffer=noise(1.2);const f=ac.createBiquadFilter();f.type='lowpass';f.frequency.setValueAtTime(3000,ac.currentTime);f.frequency.exponentialRampToValueAtTime(80,ac.currentTime+1.1);
@@ -216,7 +220,7 @@ function update(){
   debris=debris.filter(d=>d.life>0);
   // zoom in near ground, like the original
   const alt=groundY(L.x)-L.y;
-  const target=(L.alive&&alt<170)?2.0:1;
+  const target=(L.alive&&alt<110)?1.45:1;
   zoom+=(target-zoom)*0.06;
 }
 
@@ -248,7 +252,7 @@ function draw(){
 
   // camera
   const worldH=H*0.78;
-  const sx=W/Math.min(WORLD_W,1000)*zoom, sy=sx;
+  const sx=W/Math.min(WORLD_W,1400)*zoom, sy=sx;
   let camX=L.x, camY=L.y+40;
   const viewW=W/sx, viewH=H/sy;
   camX=Math.max(viewW/2,Math.min(WORLD_W-viewW/2,camX));
