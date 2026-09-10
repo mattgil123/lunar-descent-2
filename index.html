@@ -2,21 +2,26 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Lunar Descent II — Fuel Run</title>
 <style>
   html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:"Courier New",Courier,monospace;color:#dfe9ff;touch-action:none;-webkit-user-select:none;user-select:none}
-  canvas{display:block;width:100vw;height:100vh}
-  #pad{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-between;padding:0 14px 18px;pointer-events:none}
-  #pad button{pointer-events:auto;width:72px;height:72px;border:1.5px solid #dfe9ff;background:rgba(0,0,0,.35);color:#dfe9ff;font:28px "Courier New",monospace;border-radius:50%;box-shadow:0 0 8px rgba(223,233,255,.35)}
+  canvas{display:block;width:100vw;height:100vh;height:100dvh}
+  #pad{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:flex-end;padding:0 16px calc(18px + env(safe-area-inset-bottom));pointer-events:none;-webkit-touch-callout:none}
+  #pad button{pointer-events:auto;width:84px;height:84px;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;border:1.5px solid #dfe9ff;background:rgba(0,0,0,.35);color:#dfe9ff;font:28px "Courier New",monospace;border-radius:50%;box-shadow:0 0 8px rgba(223,233,255,.35)}
   #pad button:active{background:#dfe9ff;color:#000}
-  #pad .r{display:flex;gap:14px}
+  #pad .r{display:flex;gap:16px}
+  #pad #bt{width:96px;height:96px;font-size:34px}
   @media (hover:hover) and (pointer:fine){#pad{display:none}}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="pad">
+<div id="pad" oncontextmenu="return false">
   <div class="r"><button id="bl">◀</button><button id="br">▶</button></div>
   <button id="bt">▲</button>
 </div>
@@ -220,7 +225,7 @@ function update(){
   debris=debris.filter(d=>d.life>0);
   // zoom in near ground, like the original
   const alt=groundY(L.x)-L.y;
-  const target=(L.alive&&alt<110)?1.45:1;
+  const target=(L.alive&&alt<110)?(W<700?1.25:1.45):1;
   zoom+=(target-zoom)*0.06;
 }
 
@@ -252,7 +257,8 @@ function draw(){
 
   // camera
   const worldH=H*0.78;
-  const sx=W/Math.min(WORLD_W,1400)*zoom, sy=sx;
+  const mobile=W<700;
+  const sx=Math.max(W/1400,H/1500)*zoom, sy=sx;
   let camX=L.x, camY=L.y+40;
   const viewW=W/sx, viewH=H/sy;
   camX=Math.max(viewW/2,Math.min(WORLD_W-viewW/2,camX));
@@ -265,10 +271,13 @@ function draw(){
   for(let i=0;i<90;i++){const x=(i*397)%WORLD_W,y=(i*211)%(GROUND_BASE-100);ctx.fillRect(x,y,1.2,1.2);}
   ctx.restore();
 
-  // terrain
+  // terrain (solid black below the surface, then the outline)
+  ctx.save();ctx.shadowBlur=0;ctx.fillStyle='#000';ctx.beginPath();ctx.moveTo(terrain[0].x,terrain[0].y);
+  for(const p of terrain)ctx.lineTo(p.x,p.y);
+  ctx.lineTo(terrain[terrain.length-1].x,GROUND_BASE+4000);ctx.lineTo(terrain[0].x,GROUND_BASE+4000);ctx.closePath();ctx.fill();ctx.restore();
   ctx.beginPath();ctx.moveTo(terrain[0].x,terrain[0].y);
   for(const p of terrain)ctx.lineTo(p.x,p.y);
-  ctx.stroke();
+  ctx.stroke();ctx.fillStyle='#dfe9ff';
   // pads
   for(const p of pads){
     ctx.lineWidth=2.4;ctx.beginPath();ctx.moveTo(p.x1,p.y+1);ctx.lineTo(p.x2,p.y+1);ctx.stroke();ctx.lineWidth=1.4;
@@ -287,7 +296,7 @@ function draw(){
   ctx.restore();
 
   // HUD
-  ctx.shadowBlur=4;ctx.font='14px "Courier New",monospace';ctx.textAlign='left';
+  ctx.shadowBlur=4;const hf=W<700?12:14;ctx.font=hf+'px "Courier New",monospace';ctx.textAlign='left';
   const alt=Math.max(0,Math.round(groundY(L.x)-L.y-12));
   const lines=[
     ['SCORE',String(score).padStart(5,'0')],
@@ -295,39 +304,54 @@ function draw(){
     ['FUEL',String(Math.round(L.fuel)).padStart(4,'0')],
     ['LANDERS','▲'.repeat(Math.max(0,landers))]
   ];
-  lines.forEach((l,i)=>{ctx.fillText(l[0],16,26+i*18);ctx.fillText(l[1],96,26+i*18);});
+  const hx=W<700?14:16,hy=W<700?22:26,hs=W<700?16:18;
+  lines.forEach((l,i)=>{ctx.fillText(l[0],hx,hy+i*hs);ctx.fillText(l[1],hx+(W<700?70:80),hy+i*hs);});
   ctx.textAlign='right';
   const rt=[
     ['ALTITUDE',alt],
     ['HORIZ SPEED',Math.abs(L.vx*40).toFixed(0)+(L.vx<0?' ←':L.vx>0?' →':'')],
     ['VERT SPEED',Math.abs(L.vy*40).toFixed(0)+(L.vy<0?' ↑':L.vy>0?' ↓':'')]
   ];
-  rt.forEach((l,i)=>{ctx.fillText(l[0],W-96,26+i*18);ctx.fillText(String(l[1]),W-16,26+i*18);});
+  rt.forEach((l,i)=>{ctx.fillText(l[0],W-(W<700?70:96),hy+i*hs);ctx.fillText(String(l[1]),W-hx,hy+i*hs);});
   // fuel gauge
-  ctx.strokeRect(16,100,120,8);ctx.fillRect(16,100,120*(L.fuel/FUEL_MAX),8);
-  if(L.fuel<FUEL_MAX*0.2&&Math.floor(time/20)%2===0){ctx.textAlign='left';ctx.fillText('LOW FUEL',146,108);}
+  const gy=hy+4*hs-6,gw=W<700?100:120;ctx.strokeRect(hx,gy,gw,8);ctx.fillRect(hx,gy,gw*(L.fuel/FUEL_MAX),8);
+  if(L.fuel<FUEL_MAX*0.2&&Math.floor(time/20)%2===0){ctx.textAlign='left';ctx.fillText('LOW FUEL',hx+gw+10,gy+8);}
   if(state==='play'&&L.alive&&!L.landed&&L.fuel>0&&L.fuel<FUEL_MAX*0.2&&time%40===0)SFX.lowFuel();
 
   // messages
   ctx.textAlign='center';
-  if(msg&&msgT>0){ctx.font='18px "Courier New",monospace';ctx.fillText(msg,W/2,H*0.32);}
+  if(msg&&msgT>0){ctx.font=(W<700?15:18)+'px "Courier New",monospace';ctx.fillText(msg,W/2,H*0.32);}
   if(state==='title'){
-    ctx.font='34px "Courier New",monospace';ctx.fillText('LUNAR DESCENT II',W/2,H*0.36);
-    ctx.font='16px "Courier New",monospace';ctx.fillText('FUEL RUN',W/2,H*0.36+28);
-    ctx.font='13px "Courier New",monospace';
-    ['Land softly on a marked pad to score.',
+    const m=W<700;
+    ctx.font=(m?26:34)+'px "Courier New",monospace';ctx.fillText('LUNAR DESCENT II',W/2,H*0.34);
+    ctx.font=(m?14:16)+'px "Courier New",monospace';ctx.fillText('FUEL RUN',W/2,H*0.34+26);
+    ctx.font=(m?11:13)+'px "Courier New",monospace';
+    const tips=m?[
+     'Land softly on a marked pad to score.',
+     'FUEL pads refill your tank.',
+     'Lift off and keep going.',
+     '',
+     'Vert speed < 50, horiz < 18,',
+     'and keep it upright.',
+     '',
+     '◀ ▶ rotate    ▲ thrust',
+     '',
+     'TAP TO START  (SOUND ON)'
+    ]:[
+     'Land softly on a marked pad to score.',
      'Pads marked FUEL refill your tank — lift off and keep going.',
      'Vertical speed under 50, horizontal under 18, keep it upright.',
      '',
-     '← → rotate    ▲ / space thrust    (touch buttons on phone)',
+     '← → rotate    ▲ / space thrust',
      '',
-     'PRESS ANY KEY OR TAP TO START  (SOUND ON)'
-    ].forEach((t,i)=>ctx.fillText(t,W/2,H*0.36+64+i*20));
+     'PRESS ANY KEY TO START  (SOUND ON)'
+    ];
+    tips.forEach((t,i)=>ctx.fillText(t,W/2,H*0.34+58+i*(m?17:20)));
   }
   if(state==='over'&&msgT<=0){
-    ctx.font='28px "Courier New",monospace';ctx.fillText('GAME OVER',W/2,H*0.40);
-    ctx.font='15px "Courier New",monospace';ctx.fillText('FINAL SCORE '+score,W/2,H*0.40+30);
-    ctx.fillText('PRESS ANY KEY OR TAP TO PLAY AGAIN',W/2,H*0.40+56);
+    ctx.font=(W<700?24:28)+'px "Courier New",monospace';ctx.fillText('GAME OVER',W/2,H*0.40);
+    ctx.font=(W<700?13:15)+'px "Courier New",monospace';ctx.fillText('FINAL SCORE '+score,W/2,H*0.40+30);
+    ctx.fillText(W<700?'TAP TO PLAY AGAIN':'PRESS ANY KEY OR TAP TO PLAY AGAIN',W/2,H*0.40+56);
   }
 }
 
