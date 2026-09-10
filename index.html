@@ -145,7 +145,7 @@ function genTerrain(){
   }
   // occasional orbital fuel station high above the peaks
   station=null;
-  if(Math.random()<0.6){
+  if(Math.random()<0.85){
     const w=110,x1=300+Math.random()*(WORLD_W-600);
     station={x1,x2:x1+w,y:GROUND_BASE-760,h:34,kind:'fuel',mult:0,orbital:true};
   }
@@ -247,6 +247,7 @@ function update(){
 }
 
 // ---- draw ----
+function hyTop(){return W<700?110:100;}
 function drawLander(x,y,a,thrust){
   ctx.save();ctx.translate(x,y);ctx.rotate(a);
   ctx.beginPath();
@@ -332,6 +333,19 @@ function draw(){
   for(const d of debris){ctx.save();ctx.translate(d.x,d.y);ctx.rotate(d.a);ctx.beginPath();ctx.moveTo(-d.len/2,0);ctx.lineTo(d.len/2,0);ctx.stroke();ctx.restore();}
   ctx.restore();
 
+  // station locator (when the station is off screen)
+  if(station&&state==='play'){
+    const cx=(station.x1+station.x2)/2, sxp=(cx-camX)*sx+W/2, syp=(station.y-camY)*sy+H/2;
+    const off=sxp<-20||sxp>W+20||syp<-20;
+    if(off){
+      const dist=Math.round(Math.abs(cx-L.x)/10);
+      const ex=Math.max(70,Math.min(W-70,sxp)), ey=Math.max(hyTop(),Math.min(H-140,syp));
+      ctx.save();ctx.shadowBlur=4;ctx.font=(W<700?11:12)+'px "Courier New",monospace';ctx.textAlign='center';
+      const dir=sxp<0?'◀':sxp>W?'▶':'▲';
+      ctx.fillText(dir+' STATION '+dist,ex,ey);
+      ctx.restore();
+    }
+  }
   // HUD
   ctx.shadowBlur=4;const hf=W<700?12:14;ctx.font=hf+'px "Courier New",monospace';ctx.textAlign='left';
   const alt=Math.max(0,Math.round(groundY(L.x)-L.y-12));
@@ -366,7 +380,7 @@ function draw(){
     const tips=m?[
      'Land softly on a marked pad to score.',
      'FUEL pads refill your tank.',
-     'Lift off, or dock at a station.',
+     'Lift off, or follow the ◀▶ STATION marker.',
      '',
      'Vert speed < 65, horiz < 24,',
      'roughly upright.',
