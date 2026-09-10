@@ -168,7 +168,7 @@ function reset(){score=0;landers=3;L.fuel=FUEL_MAX;time=0;newRound();state='play
 
 function feet(){
   const s=Math.sin(L.a),c=Math.cos(L.a);
-  return [[L.x-9*c+12*s, L.y-9*s-12*c],[L.x+9*c+12*s, L.y+9*s-12*c]];
+  return [[L.x-9*c-12*s, L.y-9*s+12*c],[L.x+9*c-12*s, L.y+9*s+12*c]];
 }
 function explode(){
   L.alive=false;debris=[];
@@ -202,13 +202,13 @@ function update(){
       let hit=f.some(p=>p[1]>=groundY(p[0]))||L.y>=groundY(L.x)-6;
       let pad=null;
       if(station&&!hit){
-        const onTop=fx1>=station.x1&&fx2<=station.x2&&fy>=station.y-1&&fy<=station.y+14&&L.vy>=0;
+        const onTop=fx1>=station.x1&&fx2<=station.x2&&fy>=station.y-6&&fy<=station.y+16&&L.vy>=0;
         const inBox=L.x>station.x1-10&&L.x<station.x2+10&&L.y+12>station.y&&L.y-14<station.y+station.h;
         if(onTop){hit=true;pad=station;}else if(inBox){hit=true;}
       }
       if(hit){
         pad=pad||padAt(fx1,fx2);
-        const soft=Math.abs(L.vx)<0.45&&L.vy<1.25&&Math.abs(L.a)<0.2;
+        const soft=Math.abs(L.vx)<0.6&&L.vy<1.7&&Math.abs(L.a)<0.3;
         if(pad&&soft){
           L.landed=true;L.onPad=pad;L.vx=0;L.vy=0;L.a=0;L.y=pad.y-12;
           SFX.touchdown();
@@ -368,8 +368,8 @@ function draw(){
      'FUEL pads refill your tank.',
      'Lift off, or dock at a station.',
      '',
-     'Vert speed < 50, horiz < 18,',
-     'and keep it upright.',
+     'Vert speed < 65, horiz < 24,',
+     'roughly upright.',
      '',
      '◀ ▶ rotate    ▲ thrust',
      '',
@@ -377,7 +377,7 @@ function draw(){
     ]:[
      'Land softly on a marked pad to score.',
      'FUEL pads and orbital stations refill your tank — lift off and keep going.',
-     'Vertical speed under 50, horizontal under 18, keep it upright.',
+     'Vertical speed under 65, horizontal under 24, roughly upright.',
      '',
      '← → rotate    ▲ / space thrust    P pause',
      '',
