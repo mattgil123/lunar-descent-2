@@ -32,6 +32,61 @@ const G=0.016, THRUST=0.048, ROT=0.045, FUEL_MAX=1200, BURN=1.4, ROT_BURN=0.12;
 const WORLD_W=3200, GROUND_BASE=620;
 const keys={l:false,r:false,t:false,any:false};
 
+
+// ---- audio (Web Audio, no assets) ----
+const SFX=(()=>{
+  let ac=null,thr=null,thrG=null,thrF=null,refuelOsc=null,refuelG=null,lastBeep=0;
+  function ctx(){ if(!ac){ac=new (window.AudioContext||window.webkitAudioContext)();} if(ac.state==='suspended')ac.resume(); return ac; }
+  function noise(dur){const a=ctx(),b=a.createBuffer(1,a.sampleRate*dur,a.sampleRate),d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;return b;}
+  function tone(f,dur,type='square',vol=0.15,slide=0){
+    const a=ctx(),o=a.createOscillator(),g=a.createGain();o.type=type;o.frequency.value=f;
+    if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(20,f+slide),a.currentTime+dur);
+    g.gain.setValueAtTime(vol,a.currentTime);g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+dur);
+    o.connect(g).connect(a.destination);o.start();o.stop(a.currentTime+dur);
+  }
+  return {
+    unlock(){try{ctx();}catch(e){}},
+    thrust(on){
+      if(!ac)return;
+      if(on&&!thr){
+        thr=ac.createBufferSource();thr.buffer=noise(1);thr.loop=true;
+        thrF=ac.createBiquadFilter();thrF.type='lowpass';thrF.frequency.value=600;thrF.Q.value=1.5;
+        thrG=ac.createGain();thrG.gain.setValueAtTime(0.001,ac.currentTime);thrG.gain.linearRampToValueAtTime(0.35,ac.currentTime+0.08);
+        thr.connect(thrF).connect(thrG).connect(ac.destination);thr.start();
+      }else if(!on&&thr){
+        const t=thr,g=thrG;g.gain.cancelScheduledValues(ac.currentTime);g.gain.setValueAtTime(g.gain.value,ac.currentTime);g.gain.linearRampToValueAtTime(0.001,ac.currentTime+0.12);
+        t.stop(ac.currentTime+0.15);thr=null;thrG=null;
+      }
+    },
+    rotate(){ if(!ac)return; const n=performance.now(); if(n-lastBeep<90)return; lastBeep=n; tone(900,0.04,'square',0.05); },
+    crash(){
+      if(!ac)return; this.thrust(false); this.refuel(false);
+      const s=ac.createBufferSource();s.buffer=noise(1.2);const f=ac.createBiquadFilter();f.type='lowpass';f.frequency.setValueAtTime(3000,ac.currentTime);f.frequency.exponentialRampToValueAtTime(80,ac.currentTime+1.1);
+      const g=ac.createGain();g.gain.setValueAtTime(0.8,ac.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+1.2);
+      s.connect(f).connect(g).connect(ac.destination);s.start();
+      tone(120,0.6,'sawtooth',0.3,-100);
+    },
+    land(perfect){ if(!ac)return; this.thrust(false); const seq=perfect?[523,659,784,1047]:[440,554,659]; seq.forEach((f,i)=>setTimeout(()=>tone(f,0.18,'square',0.12),i*110)); },
+    touchdown(){ if(!ac)return; this.thrust(false); tone(80,0.15,'triangle',0.3,-40); },
+    refuel(on){
+      if(!ac)return;
+      if(on&&!refuelOsc){
+        refuelOsc=ac.createOscillator();refuelOsc.type='triangle';refuelOsc.frequency.setValueAtTime(220,ac.currentTime);
+        refuelG=ac.createGain();refuelG.gain.value=0.08;
+        const lfo=ac.createOscillator(),lg=ac.createGain();lfo.frequency.value=12;lg.gain.value=0.06;lfo.connect(lg).connect(refuelG.gain);lfo.start();
+        refuelOsc.connect(refuelG).connect(ac.destination);refuelOsc.start();refuelOsc._lfo=lfo;
+      }else if(!on&&refuelOsc){ refuelOsc.stop();refuelOsc._lfo.stop();refuelOsc=null;refuelG=null; }
+    },
+    refuelPitch(frac){ if(refuelOsc)refuelOsc.frequency.setTargetAtTime(220+frac*440,ac.currentTime,0.05); },
+    full(){ if(!ac)return; this.refuel(false); [880,1175].forEach((f,i)=>setTimeout(()=>tone(f,0.2,'square',0.12),i*140)); },
+    liftoff(){ if(!ac)return; tone(200,0.3,'sawtooth',0.15,400); },
+    lowFuel(){ if(!ac)return; tone(1400,0.08,'square',0.08); },
+    empty(){ if(!ac)return; this.thrust(false); [600,450,300].forEach((f,i)=>setTimeout(()=>tone(f,0.25,'square',0.12),i*180)); },
+    gameOver(){ if(!ac)return; [392,349,311,262].forEach((f,i)=>setTimeout(()=>tone(f,0.4,'triangle',0.15),i*300)); },
+    start(){ if(!ac)return; [523,784].forEach((f,i)=>setTimeout(()=>tone(f,0.12,'square',0.1),i*90)); }
+  };
+})();
+
 // ---- terrain ----
 let terrain=[],pads=[];
 function genTerrain(){
@@ -74,7 +129,7 @@ const L={x:0,y:0,vx:0,vy:0,a:0,fuel:FUEL_MAX,alive:true,landed:false,onPad:null}
 let score=0,landers=3,state='title',msg='',msgT=0,debris=[],refuelT=0,time=0,zoom=1,scoredPads=new Set(),legs=false;
 function spawn(){L.x=200+Math.random()*(WORLD_W-400);L.y=GROUND_BASE-520;L.vx=0.6+Math.random()*0.6;L.vy=0;L.a=0;L.alive=true;L.landed=false;L.onPad=null;}
 function newRound(){genTerrain();scoredPads=new Set();spawn();}
-function reset(){score=0;landers=3;L.fuel=FUEL_MAX;time=0;newRound();state='play';msg='';}
+function reset(){score=0;landers=3;L.fuel=FUEL_MAX;time=0;newRound();state='play';msg='';SFX.start();}
 
 function feet(){
   const s=Math.sin(L.a),c=Math.cos(L.a);
@@ -86,8 +141,8 @@ function explode(){
     const ang=Math.random()*Math.PI*2,sp=1+Math.random()*2.5;
     debris.push({x:L.x,y:L.y,vx:Math.cos(ang)*sp+L.vx*0.5,vy:Math.sin(ang)*sp-1,a:Math.random()*6,va:(Math.random()-0.5)*0.4,len:4+Math.random()*8,life:120});
   }
-  landers--;setMsg(landers>0?'CRASHED':'GAME OVER',150);
-  if(landers<=0){state='over';}
+  landers--;setMsg(landers>0?'CRASHED':'GAME OVER',150);SFX.crash();
+  if(landers<=0){state='over';setTimeout(()=>SFX.gameOver(),900);}
 }
 function setMsg(m,t){msg=m;msgT=t;}
 
@@ -96,9 +151,10 @@ function update(){
   if(state==='play'){
     time++;
     if(L.alive&&!L.landed){
-      if(keys.l&&L.fuel>0){L.a-=ROT;L.fuel-=ROT_BURN;}
-      if(keys.r&&L.fuel>0){L.a+=ROT;L.fuel-=ROT_BURN;}
-      const thrusting=keys.t&&L.fuel>0;
+      if(keys.l&&L.fuel>0){L.a-=ROT;L.fuel-=ROT_BURN;SFX.rotate();}
+      if(keys.r&&L.fuel>0){L.a+=ROT;L.fuel-=ROT_BURN;SFX.rotate();}
+      const thrusting=keys.t&&L.fuel>0;SFX.thrust(thrusting);
+      if(!L.fuel&&keys.t&&!L._emptyWarned){L._emptyWarned=true;SFX.empty();}
       if(thrusting){L.vx+=Math.sin(L.a)*THRUST;L.vy-=Math.cos(L.a)*THRUST;L.fuel-=BURN;}
       L.fuel=Math.max(0,L.fuel);
       L.vy+=G;L.x+=L.vx;L.y+=L.vy;
@@ -112,28 +168,29 @@ function update(){
         const soft=Math.abs(L.vx)<0.45&&L.vy<1.25&&Math.abs(L.a)<0.2;
         if(pad&&soft){
           L.landed=true;L.onPad=pad;L.vx=0;L.vy=0;L.a=0;L.y=pad.y-12;
-          if(pad.kind==='fuel'){refuelT=0;setMsg('FUEL DEPOT — REFUELING',9999);}
+          SFX.touchdown();
+          if(pad.kind==='fuel'){refuelT=0;setMsg('FUEL DEPOT — REFUELING',9999);setTimeout(()=>{if(L.landed&&L.fuel<FUEL_MAX)SFX.refuel(true);},250);}
           else{
             const key=pad.x1+':'+pad.mult;
             const quality=L.vy<0.6&&Math.abs(L.vx)<0.2?'PERFECT':'GOOD';
             let pts=(quality==='PERFECT'?100:50)*pad.mult;
             if(scoredPads.has(key))pts=Math.round(pts/4);
             scoredPads.add(key);score+=pts;
-            setMsg(quality+' LANDING  +'+pts+'  (x'+pad.mult+')',150);
+            setMsg(quality+' LANDING  +'+pts+'  (x'+pad.mult+')',150);setTimeout(()=>SFX.land(quality==='PERFECT'),200);
           }
         }else explode();
       }
     }else if(L.landed){
       if(L.onPad.kind==='fuel'){
         refuelT++;
-        L.fuel=Math.min(FUEL_MAX,L.fuel+6);
-        if(L.fuel>=FUEL_MAX)setMsg('TANK FULL — LIFT OFF',9999);
-        if(keys.t&&L.fuel>0){L.landed=false;L.onPad=null;L.vy=-0.6;msg='';}
+        const wasFull=L.fuel>=FUEL_MAX;L.fuel=Math.min(FUEL_MAX,L.fuel+6);SFX.refuelPitch(L.fuel/FUEL_MAX);
+        if(L.fuel>=FUEL_MAX){setMsg('TANK FULL — LIFT OFF',9999);if(!wasFull)SFX.full();}
+        if(keys.t&&L.fuel>0){L.landed=false;L.onPad=null;L.vy=-0.6;msg='';L._emptyWarned=false;SFX.refuel(false);SFX.liftoff();}
       }else{
         if(msgT<=0||keys.t){newRound();}
       }
     }else{ // dead
-      if(msgT<=0&&landers>0){spawn();}
+      if(msgT<=0&&landers>0){spawn();L._emptyWarned=false;}
     }
     if(L.fuel<=0&&!L.landed&&L.alive&&L.vy>2.5&&msgT<=0)setMsg('OUT OF FUEL',60);
   }
@@ -228,6 +285,7 @@ function draw(){
   // fuel gauge
   ctx.strokeRect(16,100,120,8);ctx.fillRect(16,100,120*(L.fuel/FUEL_MAX),8);
   if(L.fuel<FUEL_MAX*0.2&&Math.floor(time/20)%2===0){ctx.textAlign='left';ctx.fillText('LOW FUEL',146,108);}
+  if(state==='play'&&L.alive&&!L.landed&&L.fuel>0&&L.fuel<FUEL_MAX*0.2&&time%40===0)SFX.lowFuel();
 
   // messages
   ctx.textAlign='center';
@@ -242,7 +300,7 @@ function draw(){
      '',
      '← → rotate    ▲ / space thrust    (touch buttons on phone)',
      '',
-     'PRESS ANY KEY OR TAP TO START'
+     'PRESS ANY KEY OR TAP TO START  (SOUND ON)'
     ].forEach((t,i)=>ctx.fillText(t,W/2,H*0.36+64+i*20));
   }
   if(state==='over'&&msgT<=0){
@@ -253,7 +311,7 @@ function draw(){
 }
 
 // ---- input ----
-function startIfIdle(){ if(state==='title'||(state==='over'&&msgT<=0)){reset();return true;} return false; }
+function startIfIdle(){ SFX.unlock(); if(state==='title'||(state==='over'&&msgT<=0)){reset();return true;} return false; }
 addEventListener('keydown',e=>{
   if(startIfIdle()){e.preventDefault();return;}
   if(e.code==='ArrowLeft'||e.code==='KeyA')keys.l=true;
