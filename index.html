@@ -16,11 +16,13 @@
   #pad button:active{background:#dfe9ff;color:#000}
   #pad .r{display:flex;gap:16px}
   #pad #bt{width:96px;height:96px;font-size:34px}
-  @media (hover:hover) and (pointer:fine){#pad{display:none}}
+  #bp{position:fixed;top:calc(10px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:44px;height:36px;border:1.5px solid #dfe9ff;background:rgba(0,0,0,.4);color:#dfe9ff;font:18px "Courier New",monospace;border-radius:4px;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
+  @media (hover:hover) and (pointer:fine){#pad{display:none}#bp{display:none}}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<button id="bp" oncontextmenu="return false">‖</button>
 <div id="pad" oncontextmenu="return false">
   <div class="r"><button id="bl">◀</button><button id="br">▶</button></div>
   <button id="bt">▲</button>
@@ -34,7 +36,7 @@ addEventListener('resize',resize);resize();
 
 // ---- constants ----
 const G=0.0095, THRUST=0.038, ROT=0.045, FUEL_MAX=1200, BURN=1.4, ROT_BURN=0.12;
-const WORLD_W=3200, GROUND_BASE=620;
+const WORLD_W=6400, GROUND_BASE=620;
 const keys={l:false,r:false,t:false,any:false};
 
 
@@ -97,7 +99,7 @@ const SFX=(()=>{
 })();
 
 // ---- terrain ----
-let terrain=[],pads=[];
+let terrain=[],pads=[],station=null;
 function genTerrain(){
   terrain=[];pads=[];
   const step=24, n=Math.floor(WORLD_W/step)+1;
@@ -121,8 +123,9 @@ function genTerrain(){
   }
   // pads: 3 fuel depots + 4 scoring pads, non-overlapping
   const specs=[
-    {kind:'fuel',w:4},{kind:'fuel',w:4},{kind:'fuel',w:4},
-    {kind:'score',w:5,mult:1},{kind:'score',w:4,mult:2},{kind:'score',w:3,mult:3},{kind:'score',w:2,mult:5}
+    {kind:'fuel',w:4},{kind:'fuel',w:4},{kind:'fuel',w:4},{kind:'fuel',w:4},{kind:'fuel',w:4},
+    {kind:'score',w:5,mult:1},{kind:'score',w:5,mult:1},{kind:'score',w:4,mult:2},{kind:'score',w:4,mult:2},
+    {kind:'score',w:3,mult:3},{kind:'score',w:3,mult:3},{kind:'score',w:2,mult:5},{kind:'score',w:2,mult:5}
   ];
   const used=[];
   const vq=valleys.slice().sort(()=>Math.random()-0.5);
@@ -140,6 +143,12 @@ function genTerrain(){
     for(let k=0;k<=s.w;k++)terrain[i+k].y=py;
     pads.push({x1:terrain[i].x,x2:terrain[i+s.w].x,y:py,kind:s.kind,mult:s.mult||0});
   }
+  // occasional orbital fuel station high above the peaks
+  station=null;
+  if(Math.random()<0.6){
+    const w=110,x1=300+Math.random()*(WORLD_W-600);
+    station={x1,x2:x1+w,y:GROUND_BASE-760,h:34,kind:'fuel',mult:0,orbital:true};
+  }
 }
 function groundY(x){
   const step=24;
@@ -153,7 +162,7 @@ function padAt(x1,x2){return pads.find(p=>x1>=p.x1&&x2<=p.x2);}
 // ---- lander ----
 const L={x:0,y:0,vx:0,vy:0,a:0,fuel:FUEL_MAX,alive:true,landed:false,onPad:null};
 let score=0,landers=3,state='title',msg='',msgT=0,debris=[],refuelT=0,time=0,zoom=1,scoredPads=new Set(),legs=false;
-function spawn(){L.x=200+Math.random()*(WORLD_W-400);L.y=GROUND_BASE-600;L.vx=0.6+Math.random()*0.6;L.vy=0;L.a=0;L.alive=true;L.landed=false;L.onPad=null;}
+function spawn(){do{L.x=200+Math.random()*(WORLD_W-400);}while(station&&Math.abs(L.x-(station.x1+station.x2)/2)<400);L.y=GROUND_BASE-620;L.vx=0.6+Math.random()*0.6;L.vy=0;L.a=0;L.alive=true;L.landed=false;L.onPad=null;}
 function newRound(){genTerrain();scoredPads=new Set();spawn();}
 function reset(){score=0;landers=3;L.fuel=FUEL_MAX;time=0;newRound();state='play';msg='';SFX.start();}
 
@@ -174,6 +183,7 @@ function setMsg(m,t){msg=m;msgT=t;}
 
 // ---- update ----
 function update(){
+  if(state==='paused')return;
   if(state==='play'){
     time++;
     if(L.alive&&!L.landed){
@@ -188,14 +198,21 @@ function update(){
       if(L.x>WORLD_W-20){L.x=WORLD_W-20;L.vx=-Math.abs(L.vx)*0.5;}
       // collision
       const f=feet();
-      const hit=f.some(p=>p[1]>=groundY(p[0]))||L.y>=groundY(L.x)-6;
+      const fx1=Math.min(f[0][0],f[1][0]),fx2=Math.max(f[0][0],f[1][0]),fy=Math.max(f[0][1],f[1][1]);
+      let hit=f.some(p=>p[1]>=groundY(p[0]))||L.y>=groundY(L.x)-6;
+      let pad=null;
+      if(station&&!hit){
+        const onTop=fx1>=station.x1&&fx2<=station.x2&&fy>=station.y-1&&fy<=station.y+14&&L.vy>=0;
+        const inBox=L.x>station.x1-10&&L.x<station.x2+10&&L.y+12>station.y&&L.y-14<station.y+station.h;
+        if(onTop){hit=true;pad=station;}else if(inBox){hit=true;}
+      }
       if(hit){
-        const pad=padAt(Math.min(f[0][0],f[1][0]),Math.max(f[0][0],f[1][0]));
+        pad=pad||padAt(fx1,fx2);
         const soft=Math.abs(L.vx)<0.45&&L.vy<1.25&&Math.abs(L.a)<0.2;
         if(pad&&soft){
           L.landed=true;L.onPad=pad;L.vx=0;L.vy=0;L.a=0;L.y=pad.y-12;
           SFX.touchdown();
-          if(pad.kind==='fuel'){refuelT=0;setMsg('FUEL DEPOT — REFUELING',9999);setTimeout(()=>{if(L.landed&&L.fuel<FUEL_MAX)SFX.refuel(true);},250);}
+          if(pad.kind==='fuel'){refuelT=0;setMsg(pad.orbital?'DOCKED — REFUELING':'FUEL DEPOT — REFUELING',9999);setTimeout(()=>{if(L.landed&&L.fuel<FUEL_MAX)SFX.refuel(true);},250);}
           else{
             const key=pad.x1+':'+pad.mult;
             const quality=L.vy<0.6&&Math.abs(L.vx)<0.2?'PERFECT':'GOOD';
@@ -255,6 +272,15 @@ function draw(){
   ctx.strokeStyle='#dfe9ff';ctx.fillStyle='#dfe9ff';ctx.lineWidth=1.4;ctx.lineJoin='round';
   ctx.shadowColor='rgba(180,205,255,.7)';ctx.shadowBlur=6;
 
+  // starfield: screen space, full height, slow parallax against the camera
+  ctx.save();ctx.shadowBlur=0;
+  const px=(L.x*0.15),py=(L.y*0.05);
+  for(let i=0;i<160;i++){
+    const x=(((i*397+(i*i)%53)-px)%(W+40)+W+40)%(W+40)-20, y=(((i*211+(i*7)%31)-py)%(H+40)+H+40)%(H+40)-20;
+    const b=i%7===0?1.8:1.1;ctx.globalAlpha=i%5===0?0.55:0.9;ctx.fillRect(x,y,b,b);
+  }
+  ctx.globalAlpha=1;ctx.restore();
+
   // camera
   const worldH=H*0.78;
   const mobile=W<700;
@@ -266,10 +292,6 @@ function draw(){
   ctx.save();
   ctx.translate(W/2,H/2);ctx.scale(sx,sy);ctx.translate(-camX,-camY);
 
-  // stars (fixed in world)
-  ctx.save();ctx.shadowBlur=0;
-  for(let i=0;i<90;i++){const x=(i*397)%WORLD_W,y=(i*211)%(GROUND_BASE-100);ctx.fillRect(x,y,1.2,1.2);}
-  ctx.restore();
 
   // terrain (solid black below the surface, then the outline)
   ctx.save();ctx.shadowBlur=0;ctx.fillStyle='#000';ctx.beginPath();ctx.moveTo(terrain[0].x,terrain[0].y);
@@ -289,6 +311,21 @@ function draw(){
       ctx.beginPath();ctx.rect(cx-5,p.y-16,10,12);ctx.moveTo(cx+5,p.y-12);ctx.lineTo(cx+9,p.y-12);ctx.lineTo(cx+9,p.y-4);ctx.stroke();
       ctx.fillText(label,cx,p.y+16);
     }else ctx.fillText(label,cx,p.y+16);
+  }
+  // orbital station
+  if(station){
+    const st=station,cx=(st.x1+st.x2)/2;
+    ctx.beginPath();
+    ctx.moveTo(st.x1,st.y);ctx.lineTo(st.x2,st.y);
+    ctx.moveTo(st.x1+6,st.y);ctx.lineTo(st.x1+6,st.y+st.h);ctx.lineTo(st.x2-6,st.y+st.h);ctx.lineTo(st.x2-6,st.y);
+    for(let x=st.x1+6;x<st.x2-6;x+=16){ctx.moveTo(x,st.y);ctx.lineTo(x+16,st.y+st.h);}
+    ctx.moveTo(st.x1-40,st.y+st.h/2);ctx.lineTo(st.x1+6,st.y+st.h/2);ctx.moveTo(st.x2-6,st.y+st.h/2);ctx.lineTo(st.x2+40,st.y+st.h/2);
+    ctx.rect(st.x1-40,st.y+st.h/2-9,26,18);ctx.rect(st.x2+14,st.y+st.h/2-9,26,18);
+    ctx.moveTo(cx,st.y+st.h);ctx.lineTo(cx,st.y+st.h+22);ctx.moveTo(cx-6,st.y+st.h+22);ctx.lineTo(cx+6,st.y+st.h+22);
+    ctx.stroke();
+    ctx.lineWidth=2.4;ctx.beginPath();ctx.moveTo(st.x1,st.y+1);ctx.lineTo(st.x2,st.y+1);ctx.stroke();ctx.lineWidth=1.4;
+    if(Math.floor(time/30)%2===0){ctx.fillRect(st.x1-2,st.y-4,3,3);ctx.fillRect(st.x2-1,st.y-4,3,3);}
+    ctx.font='11px "Courier New",monospace';ctx.textAlign='center';ctx.fillText('STATION · FUEL',cx,st.y-10);
   }
   // lander
   if(L.alive)drawLander(L.x,L.y,L.a,keys.t&&L.fuel>0&&!L.landed&&state==='play');
@@ -329,7 +366,7 @@ function draw(){
     const tips=m?[
      'Land softly on a marked pad to score.',
      'FUEL pads refill your tank.',
-     'Lift off and keep going.',
+     'Lift off, or dock at a station.',
      '',
      'Vert speed < 50, horiz < 18,',
      'and keep it upright.',
@@ -339,14 +376,19 @@ function draw(){
      'TAP TO START  (SOUND ON)'
     ]:[
      'Land softly on a marked pad to score.',
-     'Pads marked FUEL refill your tank — lift off and keep going.',
+     'FUEL pads and orbital stations refill your tank — lift off and keep going.',
      'Vertical speed under 50, horizontal under 18, keep it upright.',
      '',
-     '← → rotate    ▲ / space thrust',
+     '← → rotate    ▲ / space thrust    P pause',
      '',
      'PRESS ANY KEY TO START  (SOUND ON)'
     ];
     tips.forEach((t,i)=>ctx.fillText(t,W/2,H*0.34+58+i*(m?17:20)));
+  }
+  if(state==='paused'){
+    ctx.fillStyle='rgba(0,0,0,0.55)';ctx.fillRect(0,0,W,H);ctx.fillStyle='#dfe9ff';
+    ctx.font=(W<700?24:28)+'px "Courier New",monospace';ctx.fillText('PAUSED',W/2,H*0.42);
+    ctx.font=(W<700?12:14)+'px "Courier New",monospace';ctx.fillText(W<700?'TAP ‖ TO RESUME':'PRESS P TO RESUME',W/2,H*0.42+30);
   }
   if(state==='over'&&msgT<=0){
     ctx.font=(W<700?24:28)+'px "Courier New",monospace';ctx.fillText('GAME OVER',W/2,H*0.40);
@@ -357,7 +399,13 @@ function draw(){
 
 // ---- input ----
 function startIfIdle(){ SFX.unlock(); if(state==='title'||(state==='over'&&msgT<=0)){reset();return true;} return false; }
+function togglePause(){
+  if(state==='play'){state='paused';SFX.thrust(false);SFX.refuel(false);keys.l=keys.r=keys.t=false;}
+  else if(state==='paused'){state='play';if(L.landed&&L.onPad&&L.onPad.kind==='fuel'&&L.fuel<FUEL_MAX)SFX.refuel(true);}
+}
 addEventListener('keydown',e=>{
+  if(e.code==='KeyP'||e.code==='Escape'){togglePause();e.preventDefault();return;}
+  if(state==='paused')return;
   if(startIfIdle()){e.preventDefault();return;}
   if(e.code==='ArrowLeft'||e.code==='KeyA')keys.l=true;
   if(e.code==='ArrowRight'||e.code==='KeyD')keys.r=true;
@@ -377,7 +425,10 @@ function bind(id,k){
   b.addEventListener('mousedown',on);b.addEventListener('mouseup',off);b.addEventListener('mouseleave',off);
 }
 bind('bl','l');bind('br','r');bind('bt','t');
-cv.addEventListener('touchstart',e=>{startIfIdle();},{passive:true});
+const bp=document.getElementById('bp');
+bp.addEventListener('touchstart',e=>{e.preventDefault();e.stopPropagation();if(state==='play'||state==='paused')togglePause();},{passive:false});
+bp.addEventListener('click',e=>{e.stopPropagation();if(state==='play'||state==='paused')togglePause();});
+cv.addEventListener('touchstart',e=>{if(state!=='paused')startIfIdle();},{passive:true});
 cv.addEventListener('mousedown',e=>{startIfIdle();});
 
 // ---- loop ----
