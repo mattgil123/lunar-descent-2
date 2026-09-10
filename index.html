@@ -28,7 +28,7 @@ function resize(){DPR=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight
 addEventListener('resize',resize);resize();
 
 // ---- constants ----
-const G=0.016, THRUST=0.048, ROT=0.045, FUEL_MAX=1200, BURN=1.4, ROT_BURN=0.12;
+const G=0.0095, THRUST=0.038, ROT=0.045, FUEL_MAX=1200, BURN=1.4, ROT_BURN=0.12;
 const WORLD_W=3200, GROUND_BASE=620;
 const keys={l:false,r:false,t:false,any:false};
 
@@ -92,11 +92,23 @@ let terrain=[],pads=[];
 function genTerrain(){
   terrain=[];pads=[];
   const step=24, n=Math.floor(WORLD_W/step)+1;
-  let y=GROUND_BASE-100+Math.random()*80;
+  // large-scale mountains + valleys from layered sines, plus fine random-walk detail
+  const ph=[Math.random()*7,Math.random()*7,Math.random()*7];
+  const A1=170+Math.random()*90, A2=70+Math.random()*50;
+  let d=0;
   for(let i=0;i<n;i++){
-    y+= (Math.random()-0.5)*70;
-    y=Math.max(GROUND_BASE-260,Math.min(GROUND_BASE+60,y));
-    terrain.push({x:i*step,y});
+    const x=i*step;
+    const big=Math.sin(x/430+ph[0])*A1+Math.sin(x/190+ph[1])*A2+Math.sin(x/95+ph[2])*25;
+    d+=(Math.random()-0.5)*40; d*=0.9;
+    let y=GROUND_BASE-140-big+d;
+    y=Math.max(GROUND_BASE-520,Math.min(GROUND_BASE+70,y));
+    terrain.push({x,y});
+  }
+  // find valley floors (local minima of height => max y) for pad placement
+  const valleys=[];
+  for(let i=8;i<n-8;i++){
+    let lo=true;for(let k=-7;k<=7;k++)if(terrain[i+k].y>terrain[i].y){lo=false;break;}
+    if(lo)valleys.push(i);
   }
   // pads: 3 fuel depots + 4 scoring pads, non-overlapping
   const specs=[
@@ -104,14 +116,19 @@ function genTerrain(){
     {kind:'score',w:5,mult:1},{kind:'score',w:4,mult:2},{kind:'score',w:3,mult:3},{kind:'score',w:2,mult:5}
   ];
   const used=[];
+  const vq=valleys.slice().sort(()=>Math.random()-0.5);
   for(const s of specs){
-    let tries=0,i;
-    do{ i=6+Math.floor(Math.random()*(n-12-s.w)); tries++; }
-    while(tries<60 && used.some(u=>Math.abs(u-i)<s.w+4));
-    if(tries>=60)continue;
+    let i=-1,tries=0;
+    // fuel depots and the x3/x5 pads sit in valleys when one is free
+    if(s.kind==='fuel'||s.mult>=3){
+      while(vq.length){const v=vq.pop()-Math.floor(s.w/2);if(v>4&&v<n-6-s.w&&!used.some(u=>Math.abs(u-v)<s.w+5)){i=v;break;}}
+    }
+    while(i<0&&tries<80){const c=6+Math.floor(Math.random()*(n-12-s.w));tries++;if(!used.some(u=>Math.abs(u-c)<s.w+5))i=c;}
+    if(i<0)continue;
     used.push(i);
-    const py=terrain[i].y;
-    for(let k=0;k<=s.w;k++) terrain[i+k].y=py;
+    // flatten to the lowest point of the span so the pad sits in the terrain, not on stilts
+    let py=-1e9;for(let k=0;k<=s.w;k++)py=Math.max(py,terrain[i+k].y);
+    for(let k=0;k<=s.w;k++)terrain[i+k].y=py;
     pads.push({x1:terrain[i].x,x2:terrain[i+s.w].x,y:py,kind:s.kind,mult:s.mult||0});
   }
 }
@@ -127,7 +144,7 @@ function padAt(x1,x2){return pads.find(p=>x1>=p.x1&&x2<=p.x2);}
 // ---- lander ----
 const L={x:0,y:0,vx:0,vy:0,a:0,fuel:FUEL_MAX,alive:true,landed:false,onPad:null};
 let score=0,landers=3,state='title',msg='',msgT=0,debris=[],refuelT=0,time=0,zoom=1,scoredPads=new Set(),legs=false;
-function spawn(){L.x=200+Math.random()*(WORLD_W-400);L.y=GROUND_BASE-520;L.vx=0.6+Math.random()*0.6;L.vy=0;L.a=0;L.alive=true;L.landed=false;L.onPad=null;}
+function spawn(){L.x=200+Math.random()*(WORLD_W-400);L.y=GROUND_BASE-600;L.vx=0.6+Math.random()*0.6;L.vy=0;L.a=0;L.alive=true;L.landed=false;L.onPad=null;}
 function newRound(){genTerrain();scoredPads=new Set();spawn();}
 function reset(){score=0;landers=3;L.fuel=FUEL_MAX;time=0;newRound();state='play';msg='';SFX.start();}
 
@@ -199,7 +216,7 @@ function update(){
   debris=debris.filter(d=>d.life>0);
   // zoom in near ground, like the original
   const alt=groundY(L.x)-L.y;
-  const target=(L.alive&&alt<150)?2.2:1;
+  const target=(L.alive&&alt<170)?2.0:1;
   zoom+=(target-zoom)*0.06;
 }
 
@@ -235,13 +252,13 @@ function draw(){
   let camX=L.x, camY=L.y+40;
   const viewW=W/sx, viewH=H/sy;
   camX=Math.max(viewW/2,Math.min(WORLD_W-viewW/2,camX));
-  camY=Math.min(GROUND_BASE+80-viewH/2+80,camY);
+  camY=Math.min(GROUND_BASE+120-viewH/2,camY);
   ctx.save();
   ctx.translate(W/2,H/2);ctx.scale(sx,sy);ctx.translate(-camX,-camY);
 
   // stars (fixed in world)
   ctx.save();ctx.shadowBlur=0;
-  for(let i=0;i<90;i++){const x=(i*397)%WORLD_W,y=(i*211)%(GROUND_BASE-300);ctx.fillRect(x,y,1.2,1.2);}
+  for(let i=0;i<90;i++){const x=(i*397)%WORLD_W,y=(i*211)%(GROUND_BASE-100);ctx.fillRect(x,y,1.2,1.2);}
   ctx.restore();
 
   // terrain
