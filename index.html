@@ -319,7 +319,7 @@ function draw(){
     ctx.beginPath();
     ctx.moveTo(st.x1,st.y);ctx.lineTo(st.x2,st.y);
     ctx.moveTo(st.x1+6,st.y);ctx.lineTo(st.x1+6,st.y+st.h);ctx.lineTo(st.x2-6,st.y+st.h);ctx.lineTo(st.x2-6,st.y);
-    for(let x=st.x1+6;x<st.x2-6;x+=16){ctx.moveTo(x,st.y);ctx.lineTo(x+16,st.y+st.h);}
+    for(let x=st.x1+6;x<st.x2-6;x+=16){ctx.moveTo(x,st.y);ctx.lineTo(Math.min(x+16,st.x2-6),st.y+Math.min(16,st.x2-6-x)/16*st.h);}
     ctx.moveTo(st.x1-40,st.y+st.h/2);ctx.lineTo(st.x1+6,st.y+st.h/2);ctx.moveTo(st.x2-6,st.y+st.h/2);ctx.lineTo(st.x2+40,st.y+st.h/2);
     ctx.rect(st.x1-40,st.y+st.h/2-9,26,18);ctx.rect(st.x2+14,st.y+st.h/2-9,26,18);
     ctx.moveTo(cx,st.y+st.h);ctx.lineTo(cx,st.y+st.h+22);ctx.moveTo(cx-6,st.y+st.h+22);ctx.lineTo(cx+6,st.y+st.h+22);
